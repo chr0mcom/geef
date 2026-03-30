@@ -53,16 +53,13 @@ public sealed class FailFastEvaluationStrategy : IEvaluationStrategy
             if (result.Decision is ReviewDecision.Rejected or ReviewDecision.Failed)
             {
                 cts.Cancel();
+                // Observe remaining tasks non-blocking to prevent unobserved-exception faults.
+                foreach (var remaining in pending)
+                    _ = remaining.ContinueWith(
+                        static t => _ = t.Exception,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
                 break;
             }
-        }
-
-        // Drain remaining tasks so exceptions are observed and background work does not outlive this call.
-        foreach (var remaining in pending)
-        {
-            try { await remaining; }
-            catch (OperationCanceledException) { }
-            catch { /* swallow — CTS already cancelled; result is not needed */ }
         }
 
         return new EvaluationAggregate { Reviews = results };
