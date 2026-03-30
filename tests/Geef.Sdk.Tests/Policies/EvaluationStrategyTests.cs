@@ -57,13 +57,25 @@ public sealed class EvaluationStrategyTests
     public async Task FailFast_stops_after_first_rejection()
     {
         var r1 = MakeReviewer("R1", ReviewDecision.Rejected);
-        var r2 = MakeReviewer("R2", ReviewDecision.Approved);
-        var strategy = new FailFastEvaluationStrategy();
 
-        var result = await strategy.ExecuteAsync(new[] { r1, r2 }, EmptyContext());
+        var slowReviewer = Substitute.For<IReviewer>();
+        slowReviewer.Name.Returns("Slow");
+        slowReviewer.Priority.Returns(100);
+        slowReviewer.ReviewAsync(Arg.Any<IRunContext>(), Arg.Any<CancellationToken>())
+            .Returns(async (callInfo) =>
+            {
+                await Task.Delay(2000, (CancellationToken)callInfo[1]);
+                return new ReviewResult { ReviewerName = "Slow", Decision = ReviewDecision.Approved, Duration = TimeSpan.Zero };
+            });
+
+        var strategy = new FailFastEvaluationStrategy();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await strategy.ExecuteAsync(new[] { r1, slowReviewer }, EmptyContext());
+        sw.Stop();
 
         result.HasBlockingIssues.Should().BeTrue();
         result.Reviews.Should().Contain(r => r.ReviewerName == "R1");
+        sw.ElapsedMilliseconds.Should().BeLessThan(500, "FailFast must abort before the slow reviewer finishes");
     }
 
     [Fact]

@@ -73,18 +73,25 @@ public sealed class GeefPipelineRunner<TOutput>
 
         var groundingSw = Stopwatch.StartNew();
         GroundingResult groundingResult;
+
         using (var groundingActivity = GeefDiagnostics.ActivitySource.StartActivity("geef.grounding"))
         {
             groundingActivity?.SetTag("geef.run_id", runId);
             try
             {
-                groundingResult = await _grounding.RunAsync(input ?? string.Empty, cancellationToken);
+                var ctx = MakeContext(GeefPhase.Grounding, new RunContext(), runId, null, cancellationToken);
+                groundingResult = await RunWithMiddlewareAsync(ctx,
+                    () => _grounding.RunAsync(input ?? string.Empty, ctx.CancellationToken));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not (OperationCanceledException or GeefException))
             {
+                await PublishPipelineFailedAsync(runId, ConvergenceDecision.Continue, 0, new IterationHistory(), cancellationToken);
                 throw new ProviderException(
                     $"Grounding step failed: {ex.Message}", ex, runId)
-                { Phase = GeefPhase.Grounding };
+                {
+                    Phase = GeefPhase.Grounding,
+                    ProviderName = _grounding.GetType().Name
+                };
             }
         }
         groundingSw.Stop();
@@ -127,15 +134,23 @@ public sealed class GeefPipelineRunner<TOutput>
             {
                 execActivity?.SetTag("geef.run_id", runId);
                 execActivity?.SetTag("geef.iteration", iteration);
+
                 try
                 {
-                    executionResult = await _execution.RunAsync(context, cancellationToken);
+                    var ctx = MakeContext(GeefPhase.Execution, context, runId, iteration, cancellationToken);
+                    var capturedContext = context;
+                    executionResult = await RunWithMiddlewareAsync(ctx,
+                        () => _execution.RunAsync(capturedContext, ctx.CancellationToken));
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not (OperationCanceledException or GeefException))
                 {
+                    await PublishPipelineFailedAsync(runId, ConvergenceDecision.Continue, iteration, iterationHistory, cancellationToken);
                     throw new ProviderException(
                         $"Execution step failed in iteration {iteration}: {ex.Message}", ex, runId)
-                    { Phase = GeefPhase.Execution, ProviderName = "Execution" };
+                    {
+                        Phase = GeefPhase.Execution,
+                        ProviderName = _execution.GetType().Name
+                    };
                 }
             }
             execSw.Stop();
@@ -154,11 +169,15 @@ public sealed class GeefPipelineRunner<TOutput>
             {
                 aggregate = await RunEvaluationAsync(runId, iteration, context, cancellationToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not (OperationCanceledException or GeefException))
             {
+                await PublishPipelineFailedAsync(runId, ConvergenceDecision.Continue, iteration, iterationHistory, cancellationToken);
                 throw new ProviderException(
                     $"Evaluation strategy failed in iteration {iteration}: {ex.Message}", ex, runId)
-                { Phase = GeefPhase.Evaluation };
+                {
+                    Phase = GeefPhase.Evaluation,
+                    ProviderName = _evaluationStrategy.GetType().Name
+                };
             }
 
             lastAggregate = aggregate;
@@ -187,8 +206,7 @@ public sealed class GeefPipelineRunner<TOutput>
             }
             else
             {
-                await _eventSink.PublishAsync(
-                    new PipelineFailedEvent(runId, convergenceDecision, iteration, iterationHistory, DateTimeOffset.UtcNow), cancellationToken);
+                await PublishPipelineFailedAsync(runId, convergenceDecision, iteration, iterationHistory, cancellationToken);
 
                 throw new ConvergenceFailedException(
                     $"Pipeline did not converge after {iteration} iterations. Reason: {convergenceDecision}.",
@@ -213,13 +231,20 @@ public sealed class GeefPipelineRunner<TOutput>
             finalizeActivity?.SetTag("geef.run_id", runId);
             try
             {
-                finalizeResult = await _finalizer.FinalizeAsync(context, cancellationToken);
+                var ctx = MakeContext(GeefPhase.Finalize, context, runId, null, cancellationToken);
+                var capturedContext = context;
+                finalizeResult = await RunWithMiddlewareAsync(ctx,
+                    () => _finalizer.FinalizeAsync(capturedContext, ctx.CancellationToken));
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not (OperationCanceledException or GeefException))
             {
+                await PublishPipelineFailedAsync(runId, ConvergenceDecision.Continue, iterationHistory.Count, iterationHistory, cancellationToken);
                 throw new ProviderException(
                     $"Finalizer failed: {ex.Message}", ex, runId)
-                { Phase = GeefPhase.Finalize };
+                {
+                    Phase = GeefPhase.Finalize,
+                    ProviderName = _finalizer.GetType().Name
+                };
             }
         }
         finalizeSw.Stop();
@@ -258,6 +283,65 @@ public sealed class GeefPipelineRunner<TOutput>
             .Select(r => new InstrumentedReviewer(r, runId, iteration, _eventSink))
             .ToList<IReviewer>();
 
-        return await _evaluationStrategy.ExecuteAsync(instrumentedReviewers, context, cancellationToken);
+        var ctx = MakeContext(GeefPhase.Evaluation, context, runId, iteration, cancellationToken);
+        return await RunWithMiddlewareAsync(ctx,
+            () => _evaluationStrategy.ExecuteAsync(instrumentedReviewers, context, ctx.CancellationToken));
+    }
+
+    private async Task<TResult> RunWithMiddlewareAsync<TResult>(
+        GeefMiddlewareContext ctx,
+        Func<Task<TResult>> operation)
+    {
+        if (_middlewares.Count == 0)
+            return await operation();
+
+        TResult result = default!;
+
+        Func<Task> core = async () => { result = await operation(); };
+        Func<Task> chain = core;
+
+        for (var i = _middlewares.Count - 1; i >= 0; i--)
+        {
+            var mw = _middlewares[i];
+            var next = chain;
+            chain = () => mw.InvokeAsync(ctx, next);
+        }
+
+        await chain();
+        return result;
+    }
+
+    private static GeefMiddlewareContext MakeContext(
+        GeefPhase phase,
+        IRunContext runContext,
+        string runId,
+        int? iteration,
+        CancellationToken cancellationToken)
+        => new GeefMiddlewareContext
+        {
+            Phase = phase,
+            RunContext = runContext,
+            RunId = runId,
+            Iteration = iteration,
+            CancellationToken = cancellationToken
+        };
+
+    private async Task PublishPipelineFailedAsync(
+        string runId,
+        ConvergenceDecision reason,
+        int totalIterations,
+        IterationHistory history,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _eventSink.PublishAsync(
+                new PipelineFailedEvent(runId, reason, totalIterations, history, DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        catch
+        {
+            // Swallow event-sink errors during failure path
+        }
     }
 }

@@ -18,47 +18,51 @@ public sealed class FailFastEvaluationStrategy : IEvaluationStrategy
         CancellationToken cancellationToken = default)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var linkedToken = cts.Token;
-        var results = new List<ReviewResult>(reviewers.Count);
-        var tasks = reviewers.Select(async reviewer =>
-        {
-            try
+
+        var tasks = reviewers
+            .Select(async r =>
             {
-                return await reviewer.ReviewAsync(context, linkedToken);
-            }
-            catch (OperationCanceledException) when (linkedToken.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-            {
-                return new ReviewResult
+                try
                 {
-                    ReviewerName = reviewer.Name,
-                    Decision = ReviewDecision.NotApplicable,
-                    Findings = Array.Empty<Finding>(),
-                    Duration = TimeSpan.Zero
-                };
-            }
-        }).ToList();
+                    return await r.ReviewAsync(context, cts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    return new ReviewResult
+                    {
+                        ReviewerName = r.Name,
+                        Decision = ReviewDecision.NotApplicable,
+                        Findings = Array.Empty<Finding>(),
+                        Duration = TimeSpan.Zero
+                    };
+                }
+            })
+            .ToList();
 
-        var remaining = new List<Task<ReviewResult>>(tasks);
+        var pending = new List<Task<ReviewResult>>(tasks);
+        var results = new List<ReviewResult>(reviewers.Count);
 
-        while (remaining.Count > 0)
+        while (pending.Count > 0)
         {
-            var completed = await Task.WhenAny(remaining);
-            remaining.Remove(completed);
+            var completed = await Task.WhenAny(pending);
+            pending.Remove(completed);
+
             var result = await completed;
             results.Add(result);
 
             if (result.Decision is ReviewDecision.Rejected or ReviewDecision.Failed)
             {
                 cts.Cancel();
-                foreach (var task in remaining)
-                {
-                    try { await task; }
-                    catch (OperationCanceledException) { }
-                    if (task.IsCompletedSuccessfully)
-                        results.Add(task.Result);
-                }
                 break;
             }
+        }
+
+        // Drain remaining tasks so exceptions are observed and background work does not outlive this call.
+        foreach (var remaining in pending)
+        {
+            try { await remaining; }
+            catch (OperationCanceledException) { }
+            catch { /* swallow — CTS already cancelled; result is not needed */ }
         }
 
         return new EvaluationAggregate { Reviews = results };

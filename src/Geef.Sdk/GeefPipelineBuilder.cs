@@ -61,6 +61,7 @@ public sealed class GeefPipelineBuilder<TOutput>
     /// <summary>Configures a <see cref="DelegateEventSink"/> with delegate hooks and adds it.</summary>
     public GeefPipelineBuilder<TOutput> ConfigureEvents(Action<DelegateEventSink> configure)
     {
+        ArgumentNullException.ThrowIfNull(configure);
         var sink = new DelegateEventSink();
         configure(sink);
         EventSinks.Add(sink);

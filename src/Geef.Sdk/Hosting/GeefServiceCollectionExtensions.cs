@@ -14,6 +14,7 @@ public static class GeefServiceCollectionExtensions
         this IServiceCollection services,
         Action<GeefPipelineBuilder<TOutput>> configure)
     {
+        ArgumentNullException.ThrowIfNull(configure);
         var builder = new GeefPipelineBuilder<TOutput>();
         configure(builder);
         var runner = builder.Build();
@@ -28,6 +29,7 @@ public static class GeefServiceCollectionExtensions
         this IServiceCollection services,
         Action<IServiceProvider, GeefPipelineBuilder<TOutput>> configure)
     {
+        ArgumentNullException.ThrowIfNull(configure);
         services.AddSingleton(sp =>
         {
             var builder = new GeefPipelineBuilder<TOutput>();

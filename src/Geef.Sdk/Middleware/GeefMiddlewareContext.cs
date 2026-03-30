@@ -22,6 +22,13 @@ public sealed class GeefMiddlewareContext
     /// <summary>Run ID.</summary>
     public required string RunId { get; init; }
 
+    /// <summary>
+    /// Cancellation token for the current phase. Middleware may create a linked source
+    /// (e.g. <see cref="TimeoutMiddleware"/>) and replace this token so downstream
+    /// middleware and the final operation observe the derived token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; set; }
+
     /// <summary>Additional properties (extensible).</summary>
     public IDictionary<string, object> Properties { get; } = new Dictionary<string, object>();
 }

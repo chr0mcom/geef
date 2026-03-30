@@ -9,6 +9,7 @@
     <Version>1.0.0</Version>
     <Description>GEEF Pipeline SDK — A policy-driven orchestration framework for AI agent workflows with typed context, convergence policies, and structured observability.</Description>
     <PackageTags>ai;agent;pipeline;orchestration;geef;review-loop</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
