@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F8CB47E0-35D2-445F-BE1C-47A5FB9E041D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Geef.Sdk", "src\Geef.Sdk\Geef.Sdk.csproj", "{43421966-CB54-4685-BC44-A88BF02E21EE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{FC830FF1-46F7-41C8-8242-0CC1DBC1A43B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Geef.Sdk.Tests", "tests\Geef.Sdk.Tests\Geef.Sdk.Tests.csproj", "{59BD433E-BF28-4B97-B3C6-16112A985B8E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{43421966-CB54-4685-BC44-A88BF02E21EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{43421966-CB54-4685-BC44-A88BF02E21EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{43421966-CB54-4685-BC44-A88BF02E21EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{43421966-CB54-4685-BC44-A88BF02E21EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{59BD433E-BF28-4B97-B3C6-16112A985B8E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{59BD433E-BF28-4B97-B3C6-16112A985B8E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{59BD433E-BF28-4B97-B3C6-16112A985B8E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{59BD433E-BF28-4B97-B3C6-16112A985B8E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{43421966-CB54-4685-BC44-A88BF02E21EE} = {F8CB47E0-35D2-445F-BE1C-47A5FB9E041D}
+		{59BD433E-BF28-4B97-B3C6-16112A985B8E} = {FC830FF1-46F7-41C8-8242-0CC1DBC1A43B}
+	EndGlobalSection
+EndGlobal

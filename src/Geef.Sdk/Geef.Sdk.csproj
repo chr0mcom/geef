@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <LangVersion>11</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Geef.Sdk</RootNamespace>
+    <PackageId>Geef.Sdk</PackageId>
+    <Version>1.0.0</Version>
+    <Description>GEEF Pipeline SDK — A policy-driven orchestration framework for AI agent workflows with typed context, convergence policies, and structured observability.</Description>
+    <PackageTags>ai;agent;pipeline;orchestration;geef;review-loop</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.*" />
+  </ItemGroup>
+</Project>
