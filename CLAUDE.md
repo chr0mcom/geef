@@ -17,7 +17,7 @@ dotnet test tests/Geef.Sdk.Tests/ -v detailed
 
 ## Architecture
 
-Geef.Sdk is a **policy-driven orchestration framework for AI agent workflows** (.NET 7, C# 11). It implements the GEEF pattern — a typed, observable, policy-controlled feedback loop for AI tasks.
+Geef.Sdk is a **policy-driven orchestration framework for AI agent workflows** (.NET 10, C# 14). It implements the GEEF pattern — a typed, observable, policy-controlled feedback loop for AI tasks.
 
 ### The GEEF Loop
 
