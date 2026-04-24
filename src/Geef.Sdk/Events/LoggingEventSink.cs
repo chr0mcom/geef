@@ -1,3 +1,4 @@
+using Geef.Sdk.Advisors;
 using Microsoft.Extensions.Logging;
 
 namespace Geef.Sdk.Events;
@@ -59,6 +60,25 @@ public sealed class LoggingEventSink : IGeefEventSink
             case PipelineFailedEvent e:
                 _logger.LogError("[{RunId}] Pipeline failed after {Iterations} iterations: {Reason}",
                     e.RunId, e.TotalIterations, e.Reason);
+                break;
+            case AdvisorConsultationStartedEvent e:
+                _logger.LogInformation(
+                    "[{RunId}] Advisor '{AdvisorName}' consultation started (phase {Phase}, iteration {Iteration}, id {ConsultationId})",
+                    e.RunId, e.AdvisorName, e.Phase, e.Iteration, e.ConsultationId);
+                break;
+            case AdvisorConsultationCompletedEvent e:
+                if (e.Response.Outcome == AdvisorOutcome.Success)
+                {
+                    _logger.LogInformation(
+                        "[{RunId}] Advisor '{AdvisorName}' consultation completed (id {ConsultationId}, confidence {Confidence}, duration {Duration})",
+                        e.RunId, e.AdvisorName, e.ConsultationId, e.Response.Confidence, e.Response.Duration);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[{RunId}] Advisor '{AdvisorName}' consultation completed with degraded outcome {Outcome} (id {ConsultationId})",
+                        e.RunId, e.AdvisorName, e.Response.Outcome, e.ConsultationId);
+                }
                 break;
             default:
                 _logger.LogDebug("[{RunId}] Unknown event: {EventType}", geefEvent.RunId, geefEvent.GetType().Name);

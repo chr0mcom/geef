@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Geef.Sdk.Advisors;
 using Geef.Sdk.Context;
 using Geef.Sdk.Diagnostics;
 using Geef.Sdk.Events;
@@ -26,6 +27,9 @@ public sealed class GeefPipelineRunner<TOutput>
     private readonly IEvaluationStrategy _evaluationStrategy;
     private readonly IReadOnlyList<IGeefMiddleware> _middlewares;
     private readonly IGeefEventSink _eventSink;
+    private readonly IReadOnlyList<IAdvisor> _advisors;
+    private readonly IAdvisorPolicy _advisorPolicy;
+    private readonly AdvisorBudget _advisorBudgetTemplate;
 
     internal GeefPipelineRunner(GeefPipelineBuilder<TOutput> builder)
     {
@@ -42,6 +46,9 @@ public sealed class GeefPipelineRunner<TOutput>
             1 => builder.EventSinks[0],
             _ => new CompositeEventSink(builder.EventSinks)
         };
+        _advisors = builder.Advisors.ToList();
+        _advisorPolicy = builder.AdvisorPolicy;
+        _advisorBudgetTemplate = builder.AdvisorBudget;
     }
 
     /// <summary>
@@ -66,6 +73,20 @@ public sealed class GeefPipelineRunner<TOutput>
 
         await _eventSink.PublishAsync(
             new PipelineStartedEvent(runId, input ?? string.Empty, DateTimeOffset.UtcNow), cancellationToken);
+
+        var orchestrator = new AdvisorOrchestrator(
+            _advisors, _advisorPolicy, _advisorBudgetTemplate, _eventSink, runId);
+        orchestrator.SetCurrentPhase(GeefPhase.Grounding, null);
+
+        var advisorAware = new List<IAdvisorAware>();
+        if (_grounding is IAdvisorAware ga) advisorAware.Add(ga);
+        if (_execution is IAdvisorAware ea) advisorAware.Add(ea);
+        foreach (var r in _reviewers) if (r is IAdvisorAware ra) advisorAware.Add(ra);
+        if (_finalizer is IAdvisorAware fa) advisorAware.Add(fa);
+        foreach (var aware in advisorAware) aware.SetAdvisorOrchestrator(orchestrator);
+
+        try
+        {
 
         // 1. GROUNDING
         await _eventSink.PublishAsync(
@@ -117,6 +138,9 @@ public sealed class GeefPipelineRunner<TOutput>
             var iteration = context.GetRequired<int>(GeefKeys.CurrentIteration) + 1;
             context = context.Set(GeefKeys.CurrentIteration, iteration);
 
+            orchestrator.StartIteration(iteration);
+            orchestrator.SetCurrentPhase(GeefPhase.Execution, iteration);
+
             var iterationStart = DateTimeOffset.UtcNow;
 
             using var iterActivity = GeefDiagnostics.ActivitySource.StartActivity("geef.iteration");
@@ -164,6 +188,8 @@ public sealed class GeefPipelineRunner<TOutput>
                 new ExecutionCompletedEvent(runId, iteration, executionResult, execSw.Elapsed, DateTimeOffset.UtcNow), cancellationToken);
 
             // --- Evaluation ---
+            orchestrator.SetCurrentPhase(GeefPhase.Evaluation, iteration);
+
             EvaluationAggregate aggregate;
             try
             {
@@ -220,6 +246,8 @@ public sealed class GeefPipelineRunner<TOutput>
         }
 
         // 4. FINALIZE
+        orchestrator.SetCurrentPhase(GeefPhase.Finalize, null);
+
         await _eventSink.PublishAsync(
             new FinalizeStartedEvent(runId, DateTimeOffset.UtcNow), cancellationToken);
 
@@ -265,8 +293,16 @@ public sealed class GeefPipelineRunner<TOutput>
             TotalDuration = sw.Elapsed,
             FinalContext = finalizeResult.FinalContext,
             History = iterationHistory,
-            Success = true
+            Success = true,
+            AdvisorConsultations = orchestrator.Provenance.Consultations,
+            AdvisorAttributions = orchestrator.Provenance.Attributions,
         };
+
+        }
+        finally
+        {
+            foreach (var aware in advisorAware) aware.SetAdvisorOrchestrator(null);
+        }
     }
 
     private async Task<EvaluationAggregate> RunEvaluationAsync(
