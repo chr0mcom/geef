@@ -1,3 +1,4 @@
+using Geef.Sdk.Advisors;
 using Geef.Sdk.Context;
 using Geef.Sdk.Runtime;
 
@@ -29,4 +30,12 @@ public sealed record GeefPipelineResult<TOutput>
 
     /// <summary>Complete iteration history.</summary>
     public required IterationHistory History { get; init; }
+
+    /// <summary>All advisor consultations that happened during the run.</summary>
+    public IReadOnlyList<AdvisorConsultationRecord> AdvisorConsultations { get; init; }
+        = Array.Empty<AdvisorConsultationRecord>();
+
+    /// <summary>All artifact attributions to advisor consultations.</summary>
+    public IReadOnlyList<AdvisorArtifactAttribution> AdvisorAttributions { get; init; }
+        = Array.Empty<AdvisorArtifactAttribution>();
 }

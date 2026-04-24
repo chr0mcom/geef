@@ -112,6 +112,60 @@ Control how reviewers execute:
 | `FailFastEvaluationStrategy` | Parallel, but cancel once the first reviewer rejects |
 | `PriorityOrderedEvaluationStrategy` | Sequential by `IReviewer.Priority` (low = high priority), stops on first error-severity rejection |
 
+### Advisors
+
+An **Advisor** is a third role alongside Executor and Reviewer. Advisors are consulted *during* a provider's work for strategic guidance; they do not produce findings. Any provider (grounding, execution, reviewer, finalizer) may opt in by deriving from `AdvisorAwareProviderBase` and calling `Advisor?.ConsultAsync(...)`.
+
+Every consultation goes through the `IAdvisorOrchestrator`, which enforces the precedence rule **Budget > Policy > Provider**, records provenance, and publishes events. Failure modes are returned as `AdvisorOutcome` (`Success`, `BudgetExceeded`, `InfrastructureFailure`, `NoApplicableAdvice`) — never as exceptions (except `OperationCanceledException`).
+
+```csharp
+public sealed class MyExecution : AdvisorAwareProviderBase, IExecutionStep
+{
+    public async Task<ExecutionResult> RunAsync(IRunContext ctx, CancellationToken ct = default)
+    {
+        if (Advisor is not null)
+        {
+            var response = await Advisor.ConsultAsync(
+                new AdvisorQuery
+                {
+                    Question = "Is this approach risky?",
+                    Character = AdvisorQueryCharacter.RiskAssessment,
+                },
+                ctx, ct);
+
+            if (response.Outcome == AdvisorOutcome.Success)
+            {
+                // Use response.AdviceText / response.Risks / response.SuggestedActions
+                // Attribute any artifact produced from this advice:
+                Advisor.AttributeArtifactToConsultation("my:artifact", response.ConsultationId!);
+            }
+        }
+        // ... produce artifacts
+        return new ExecutionResult { UpdatedContext = ctx };
+    }
+}
+
+var pipeline = Geef.CreatePipeline<string>()
+    .UseGrounding(new MyGrounding())
+    .UseExecution(new MyExecution())
+    .AddReviewer(new MyReviewer())
+    .UseFinalizer(new MyFinalizer())
+    .AddAdvisor(new MyAdvisor())
+    .UseAdvisorBudget(new AdvisorBudget
+    {
+        MaxConsultationsPerRun = 10,
+        MaxConsultationsPerIteration = 3,
+        MaxTotalAdvisorTokens = 20_000,
+    })
+    .Build();
+
+var result = await pipeline.RunAsync("input");
+// Consultations and artifact attributions are available on the result:
+Console.WriteLine($"Consultations: {result.AdvisorConsultations.Count}");
+```
+
+Pipelines without any advisor registered are unaffected — advisors are fully optional and introduce no breaking changes.
+
 ### Observability
 
 **Structured Events** via `IGeefEventSink`:
@@ -165,8 +219,9 @@ src/Geef.Sdk/
 ├── Context/          ContextKey<T>, IRunContext, RunContext, GeefKeys
 ├── Providers/        IGroundingStep, IExecutionStep, IReviewer, IFinalizer<T>
 ├── Results/          Finding, ReviewResult, EvaluationAggregate, FinalizeResult<T>
-├── Policies/         IConvergencePolicy, DefaultConvergencePolicy, 4× EvaluationStrategy
-├── Events/           IGeefEvent, IGeefEventSink, 4× sinks, 13× event records
+├── Advisors/         IAdvisor, IAdvisorOrchestrator, AdvisorOrchestrator, IAdvisorAware, AdvisorAwareProviderBase, provenance + query/response records
+├── Policies/         IConvergencePolicy, DefaultConvergencePolicy, 4× EvaluationStrategy, IAdvisorPolicy, AdvisorBudget, AdvisorBudgetState
+├── Events/           IGeefEvent, IGeefEventSink, 4× sinks, 15× event records
 ├── Middleware/       IGeefMiddleware, TimeoutMiddleware, TracingMiddleware, ExceptionHandlingMiddleware
 ├── Runtime/          IterationRecord, IterationHistory, InstrumentedReviewer
 ├── Exceptions/       GeefException hierarchy (5 types)

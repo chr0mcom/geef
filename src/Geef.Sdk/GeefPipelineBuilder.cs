@@ -1,3 +1,4 @@
+using Geef.Sdk.Advisors;
 using Geef.Sdk.Events;
 using Geef.Sdk.Exceptions;
 using Geef.Sdk.Middleware;
@@ -21,6 +22,9 @@ public sealed class GeefPipelineBuilder<TOutput>
     internal IEvaluationStrategy EvaluationStrategy { get; private set; } = new SequentialEvaluationStrategy();
     internal List<IGeefMiddleware> Middlewares { get; } = new();
     internal List<IGeefEventSink> EventSinks { get; } = new();
+    internal List<IAdvisor> Advisors { get; } = new();
+    internal IAdvisorPolicy AdvisorPolicy { get; private set; } = new DefaultAdvisorPolicy();
+    internal AdvisorBudget AdvisorBudget { get; private set; } = new AdvisorBudget();
 
     /// <summary>Sets the grounding step.</summary>
     public GeefPipelineBuilder<TOutput> UseGrounding(IGroundingStep grounding)
@@ -65,6 +69,38 @@ public sealed class GeefPipelineBuilder<TOutput>
         var sink = new DelegateEventSink();
         configure(sink);
         EventSinks.Add(sink);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers an advisor that providers can consult during the run. Advisor names
+    /// must be unique within a pipeline; registering two advisors with the same
+    /// <see cref="IAdvisor.Name"/> throws <see cref="PipelineConfigurationException"/>.
+    /// </summary>
+    /// <param name="advisor">The advisor to register.</param>
+    public GeefPipelineBuilder<TOutput> AddAdvisor(IAdvisor advisor)
+    {
+        ArgumentNullException.ThrowIfNull(advisor);
+        if (Advisors.Any(a => string.Equals(a.Name, advisor.Name, StringComparison.Ordinal)))
+            throw new PipelineConfigurationException(
+                $"An advisor with name '{advisor.Name}' is already registered. Advisor names must be unique.");
+        Advisors.Add(advisor);
+        return this;
+    }
+
+    /// <summary>Sets the advisor consultation policy (default: <see cref="DefaultAdvisorPolicy"/> that allows everything).</summary>
+    /// <param name="policy">The consultation policy to use.</param>
+    public GeefPipelineBuilder<TOutput> UseAdvisorPolicy(IAdvisorPolicy policy)
+    {
+        AdvisorPolicy = policy ?? throw new ArgumentNullException(nameof(policy));
+        return this;
+    }
+
+    /// <summary>Sets the advisor budget (default: 10 consultations / 20000 tokens / 5 min per run).</summary>
+    /// <param name="budget">The advisor budget configuration.</param>
+    public GeefPipelineBuilder<TOutput> UseAdvisorBudget(AdvisorBudget budget)
+    {
+        AdvisorBudget = budget ?? throw new ArgumentNullException(nameof(budget));
         return this;
     }
 

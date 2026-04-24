@@ -39,6 +39,12 @@ public sealed class DelegateEventSink : IGeefEventSink
     /// <summary>Called when a pipeline fails.</summary>
     public Func<PipelineFailedEvent, Task>? OnPipelineFailed { get; set; }
 
+    /// <summary>Called when an advisor consultation starts.</summary>
+    public Func<AdvisorConsultationStartedEvent, Task>? OnAdvisorConsultationStarted { get; set; }
+
+    /// <summary>Called when an advisor consultation completes (including degraded outcomes).</summary>
+    public Func<AdvisorConsultationCompletedEvent, Task>? OnAdvisorConsultationCompleted { get; set; }
+
     /// <inheritdoc />
     public async ValueTask PublishAsync(IGeefEvent geefEvent, CancellationToken cancellationToken = default)
     {
@@ -55,6 +61,8 @@ public sealed class DelegateEventSink : IGeefEventSink
             FinalizeCompletedEvent e => OnFinalizeCompleted?.Invoke(e),
             PipelineCompletedEvent e => OnPipelineCompleted?.Invoke(e),
             PipelineFailedEvent e => OnPipelineFailed?.Invoke(e),
+            AdvisorConsultationStartedEvent e => OnAdvisorConsultationStarted?.Invoke(e),
+            AdvisorConsultationCompletedEvent e => OnAdvisorConsultationCompleted?.Invoke(e),
             _ => null
         };
 

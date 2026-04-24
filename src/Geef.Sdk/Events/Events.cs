@@ -1,3 +1,5 @@
+using Geef.Sdk.Advisors;
+using Geef.Sdk.Middleware;
 using Geef.Sdk.Policies;
 using Geef.Sdk.Results;
 using Geef.Sdk.Runtime;
@@ -42,3 +44,32 @@ public sealed record PipelineCompletedEvent(string RunId, bool Success, int Tota
 
 /// <summary>Fired when a pipeline run fails due to convergence issues.</summary>
 public sealed record PipelineFailedEvent(string RunId, ConvergenceDecision Reason, int TotalIterations, IterationHistory History, DateTimeOffset Timestamp) : IGeefEvent;
+
+/// <summary>
+/// Fired when an advisor consultation starts. Only fired when the advisor is actually
+/// invoked — NOT fired on <see cref="AdvisorOutcome.BudgetExceeded"/> or policy-rejected
+/// <see cref="AdvisorOutcome.NoApplicableAdvice"/> paths.
+/// </summary>
+public sealed record AdvisorConsultationStartedEvent(
+    string RunId,
+    int? Iteration,
+    GeefPhase Phase,
+    string AdvisorName,
+    string ConsultationId,
+    AdvisorQuery Query,
+    DateTimeOffset Timestamp) : IGeefEvent;
+
+/// <summary>
+/// Fired when an advisor consultation completes (including degraded outcomes
+/// <see cref="AdvisorOutcome.BudgetExceeded"/>, <see cref="AdvisorOutcome.InfrastructureFailure"/>,
+/// and <see cref="AdvisorOutcome.NoApplicableAdvice"/> from policy rejection).
+/// Not fired when no advisor is registered at all.
+/// </summary>
+public sealed record AdvisorConsultationCompletedEvent(
+    string RunId,
+    int? Iteration,
+    GeefPhase Phase,
+    string AdvisorName,
+    string ConsultationId,
+    AdvisorResponse Response,
+    DateTimeOffset Timestamp) : IGeefEvent;
