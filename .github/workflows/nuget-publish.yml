@@ -38,6 +38,9 @@ jobs:
   publish:
     name: Build, test and publish
     runs-on: ubuntu-latest
+    environment:
+      name: nuget.org
+      url: https://www.nuget.org/packages/Geef.Sdk
     permissions:
       contents: read
     steps:
