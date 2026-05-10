@@ -1,0 +1,110 @@
+name: NuGet Publish
+
+# Builds, tests, packs and pushes Geef.Sdk to nuget.org.
+#
+# Triggers:
+#   - Push to `main` touching SDK sources/tests/CI metadata → publish using
+#     the <Version> from src/Geef.Sdk/Geef.Sdk.csproj. nuget.org rejects
+#     duplicate versions; we pass --skip-duplicate so re-runs are idempotent.
+#   - Tag `v*` (e.g. v1.2.3) → publish that exact version.
+#   - Manual workflow_dispatch with optional version override.
+#
+# Required secrets:
+#   - NUGET_API_KEY  (https://www.nuget.org/account/apikeys)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/Geef.Sdk/**'
+      - 'tests/**'
+      - 'Geef.Sdk.sln'
+      - 'global.json'
+      - 'nuget.config'
+      - '.github/workflows/nuget-publish.yml'
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override package version (e.g. 1.2.3). Leave empty to use csproj version.'
+        required: false
+        type: string
+
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Geef.Sdk.sln
+
+      - name: Build (Release)
+        run: dotnet build Geef.Sdk.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Geef.Sdk.sln -c Release --no-build --verbosity normal
+
+      - name: Determine package version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=""
+          fi
+          if [[ -n "$VERSION" ]]; then
+            echo "Using explicit version: $VERSION"
+          else
+            echo "Using version from csproj"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pack
+        run: |
+          if [[ -n "${{ steps.ver.outputs.version }}" ]]; then
+            dotnet pack src/Geef.Sdk/Geef.Sdk.csproj -c Release --no-build \
+              -o artifacts \
+              -p:Version=${{ steps.ver.outputs.version }} \
+              -p:ContinuousIntegrationBuild=true
+          else
+            dotnet pack src/Geef.Sdk/Geef.Sdk.csproj -c Release --no-build \
+              -o artifacts \
+              -p:ContinuousIntegrationBuild=true
+          fi
+
+      - name: Upload nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.*nupkg
+          if-no-files-found: error
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [[ -z "$NUGET_API_KEY" ]]; then
+            echo "::error::NUGET_API_KEY secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          dotnet nuget push "artifacts/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
