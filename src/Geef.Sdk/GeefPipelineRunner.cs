@@ -28,6 +28,7 @@ public sealed class GeefPipelineRunner<TOutput>
     private readonly IReadOnlyList<IGeefMiddleware> _middlewares;
     private readonly IGeefEventSink _eventSink;
     private readonly IReadOnlyList<IAdvisor> _advisors;
+    private readonly IReadOnlyList<(IAdvisor Advisor, AdvisorTrigger Trigger)> _triggeredAdvisors;
     private readonly IAdvisorPolicy _advisorPolicy;
     private readonly AdvisorBudget _advisorBudgetTemplate;
 
@@ -47,6 +48,7 @@ public sealed class GeefPipelineRunner<TOutput>
             _ => new CompositeEventSink(builder.EventSinks)
         };
         _advisors = builder.Advisors.ToList();
+        _triggeredAdvisors = builder.TriggeredAdvisors.ToList();
         _advisorPolicy = builder.AdvisorPolicy;
         _advisorBudgetTemplate = builder.AdvisorBudget;
     }
@@ -74,8 +76,11 @@ public sealed class GeefPipelineRunner<TOutput>
         await _eventSink.PublishAsync(
             new PipelineStartedEvent(runId, input ?? string.Empty, DateTimeOffset.UtcNow), cancellationToken);
 
+        // All advisors (provider-driven + runner-triggered) share the same orchestrator
+        // so budget, policy, provenance, and events are tracked uniformly.
+        var allAdvisors = _advisors.Concat(_triggeredAdvisors.Select(t => t.Advisor)).ToList();
         var orchestrator = new AdvisorOrchestrator(
-            _advisors, _advisorPolicy, _advisorBudgetTemplate, _eventSink, runId);
+            allAdvisors, _advisorPolicy, _advisorBudgetTemplate, _eventSink, runId);
         orchestrator.SetCurrentPhase(GeefPhase.Grounding, null);
 
         var advisorAware = new List<IAdvisorAware>();
@@ -132,6 +137,7 @@ public sealed class GeefPipelineRunner<TOutput>
 
         var convergenceDecision = ConvergenceDecision.Continue;
         EvaluationAggregate? lastAggregate = null;
+        var recoveryAttempted = false;
 
         while (convergenceDecision == ConvergenceDecision.Continue)
         {
@@ -140,6 +146,9 @@ public sealed class GeefPipelineRunner<TOutput>
 
             orchestrator.StartIteration(iteration);
             orchestrator.SetCurrentPhase(GeefPhase.Execution, iteration);
+
+            // Consult runner-triggered pre-execution advisors and inject GeefKeys.AdvisorContext.
+            context = await ConsultPreExecutionAdvisorsAsync(context, iteration, orchestrator, cancellationToken);
 
             var iterationStart = DateTimeOffset.UtcNow;
 
@@ -232,16 +241,34 @@ public sealed class GeefPipelineRunner<TOutput>
             }
             else
             {
-                await PublishPipelineFailedAsync(runId, convergenceDecision, iteration, iterationHistory, cancellationToken);
+                // If OnConvergenceFailure advisors are registered and recovery has not been tried yet,
+                // consult them, inject their guidance, and allow exactly ONE recovery pass.
+                var onFailureAdvisors = _triggeredAdvisors
+                    .Where(t => t.Trigger == AdvisorTrigger.OnConvergenceFailure)
+                    .ToList();
 
-                throw new ConvergenceFailedException(
-                    $"Pipeline did not converge after {iteration} iterations. Reason: {convergenceDecision}.",
-                    runId)
+                if (!recoveryAttempted && onFailureAdvisors.Count > 0)
                 {
-                    Reason = convergenceDecision,
-                    History = iterationHistory,
-                    LastEvaluation = aggregate
-                };
+                    recoveryAttempted = true;
+                    orchestrator.SetCurrentPhase(GeefPhase.Execution, iteration);
+                    context = await ConsultOnConvergenceFailureAdvisorsAsync(
+                        context, iteration, onFailureAdvisors, orchestrator, cancellationToken);
+                    // Re-enter the loop for one recovery pass.
+                    convergenceDecision = ConvergenceDecision.Continue;
+                }
+                else
+                {
+                    await PublishPipelineFailedAsync(runId, convergenceDecision, iteration, iterationHistory, cancellationToken);
+
+                    throw new ConvergenceFailedException(
+                        $"Pipeline did not converge after {iteration} iterations. Reason: {convergenceDecision}.",
+                        runId)
+                    {
+                        Reason = convergenceDecision,
+                        History = iterationHistory,
+                        LastEvaluation = aggregate
+                    };
+                }
             }
         }
 
@@ -361,6 +388,73 @@ public sealed class GeefPipelineRunner<TOutput>
             Iteration = iteration,
             CancellationToken = cancellationToken
         };
+
+    private async Task<IRunContext> ConsultPreExecutionAdvisorsAsync(
+        IRunContext context,
+        int iteration,
+        AdvisorOrchestrator orchestrator,
+        CancellationToken cancellationToken)
+    {
+        var active = _triggeredAdvisors
+            .Where(t => t.Trigger == AdvisorTrigger.BeforeEveryExecution
+                     || (t.Trigger == AdvisorTrigger.BeforeFirstExecution && iteration == 1))
+            .ToList();
+
+        if (active.Count == 0) return context;
+
+        return await BuildAdvisorContextAsync(
+            context, active, orchestrator,
+            new AdvisorQuery { Question = "Pre-execution guidance requested.", Character = AdvisorQueryCharacter.DecisionSupport },
+            cancellationToken);
+    }
+
+    private async Task<IRunContext> ConsultOnConvergenceFailureAdvisorsAsync(
+        IRunContext context,
+        int iteration,
+        IReadOnlyList<(IAdvisor Advisor, AdvisorTrigger Trigger)> advisors,
+        AdvisorOrchestrator orchestrator,
+        CancellationToken cancellationToken)
+    {
+        return await BuildAdvisorContextAsync(
+            context, advisors, orchestrator,
+            new AdvisorQuery { Question = "Convergence failure: recovery guidance requested.", Character = AdvisorQueryCharacter.Diagnostic },
+            cancellationToken);
+    }
+
+    private static async Task<IRunContext> BuildAdvisorContextAsync(
+        IRunContext context,
+        IReadOnlyList<(IAdvisor Advisor, AdvisorTrigger Trigger)> advisors,
+        AdvisorOrchestrator orchestrator,
+        AdvisorQuery query,
+        CancellationToken cancellationToken)
+    {
+        var outputs = new List<string>(advisors.Count);
+
+        foreach (var (advisor, _) in advisors)
+        {
+            AdvisorResponse response;
+            try
+            {
+                response = await orchestrator.ConsultAsync(advisor.Name, query, context, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (response.Outcome == AdvisorOutcome.Success && !string.IsNullOrWhiteSpace(response.AdviceText))
+                outputs.Add($"## {advisor.Name}\n{response.AdviceText}");
+        }
+
+        if (outputs.Count == 0) return context;
+
+        var block = $"[Advisor consultations]\n\n{string.Join("\n\n", outputs)}\n\n[End of advisor consultations]";
+        return context.Set(GeefKeys.AdvisorContext, block);
+    }
 
     private async Task PublishPipelineFailedAsync(
         string runId,

@@ -23,6 +23,7 @@ public sealed class GeefPipelineBuilder<TOutput>
     internal List<IGeefMiddleware> Middlewares { get; } = new();
     internal List<IGeefEventSink> EventSinks { get; } = new();
     internal List<IAdvisor> Advisors { get; } = new();
+    internal List<(IAdvisor Advisor, AdvisorTrigger Trigger)> TriggeredAdvisors { get; } = new();
     internal IAdvisorPolicy AdvisorPolicy { get; private set; } = new DefaultAdvisorPolicy();
     internal AdvisorBudget AdvisorBudget { get; private set; } = new AdvisorBudget();
 
@@ -73,20 +74,42 @@ public sealed class GeefPipelineBuilder<TOutput>
     }
 
     /// <summary>
-    /// Registers an advisor that providers can consult during the run. Advisor names
-    /// must be unique within a pipeline; registering two advisors with the same
-    /// <see cref="IAdvisor.Name"/> throws <see cref="PipelineConfigurationException"/>.
+    /// Registers an advisor that providers can consult during the run via <see cref="IAdvisorAware"/>.
+    /// Advisor names must be unique; registering two advisors with the same <see cref="IAdvisor.Name"/>
+    /// throws <see cref="PipelineConfigurationException"/>.
     /// </summary>
     /// <param name="advisor">The advisor to register.</param>
     public GeefPipelineBuilder<TOutput> AddAdvisor(IAdvisor advisor)
     {
         ArgumentNullException.ThrowIfNull(advisor);
-        if (Advisors.Any(a => string.Equals(a.Name, advisor.Name, StringComparison.Ordinal)))
+        if (IsAdvisorNameRegistered(advisor.Name))
             throw new PipelineConfigurationException(
                 $"An advisor with name '{advisor.Name}' is already registered. Advisor names must be unique.");
         Advisors.Add(advisor);
         return this;
     }
+
+    /// <summary>
+    /// Registers an advisor that the runner consults automatically at the specified trigger point.
+    /// The advisor is also available to provider-driven consultation via <see cref="IAdvisorAware"/>.
+    /// Advisor names must be unique; registering two advisors with the same <see cref="IAdvisor.Name"/>
+    /// throws <see cref="PipelineConfigurationException"/>.
+    /// </summary>
+    /// <param name="advisor">The advisor to register.</param>
+    /// <param name="trigger">When the runner should automatically consult this advisor.</param>
+    public GeefPipelineBuilder<TOutput> AddAdvisor(IAdvisor advisor, AdvisorTrigger trigger)
+    {
+        ArgumentNullException.ThrowIfNull(advisor);
+        if (IsAdvisorNameRegistered(advisor.Name))
+            throw new PipelineConfigurationException(
+                $"An advisor with name '{advisor.Name}' is already registered. Advisor names must be unique.");
+        TriggeredAdvisors.Add((advisor, trigger));
+        return this;
+    }
+
+    private bool IsAdvisorNameRegistered(string name)
+        => Advisors.Any(a => string.Equals(a.Name, name, StringComparison.Ordinal))
+        || TriggeredAdvisors.Any(t => string.Equals(t.Advisor.Name, name, StringComparison.Ordinal));
 
     /// <summary>Sets the advisor consultation policy (default: <see cref="DefaultAdvisorPolicy"/> that allows everything).</summary>
     /// <param name="policy">The consultation policy to use.</param>
