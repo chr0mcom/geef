@@ -23,13 +23,28 @@ public sealed class DefaultConvergencePolicy : IConvergencePolicy
     /// <summary>Whether regression should be detected and reported. Default: true.</summary>
     public bool DetectRegression { get; init; } = true;
 
+    /// <summary>
+    /// How to treat reviewers that reported an infrastructure failure (<see cref="ReviewDecision.Failed"/>).
+    /// Default: <see cref="FailedReviewerHandling.Block"/> — preserves the pre-fault-isolation behaviour
+    /// where a failed reviewer blocks convergence. Set to <see cref="FailedReviewerHandling.TreatAsNonBlocking"/>
+    /// to allow the pipeline to converge even when some reviewers were temporarily unavailable.
+    /// </summary>
+    public FailedReviewerHandling FailedReviewerHandling { get; init; } = FailedReviewerHandling.Block;
+
     /// <inheritdoc />
     public ConvergenceDecision Evaluate(
         IterationHistory history,
         EvaluationAggregate currentAggregate,
         TimeSpan elapsed)
     {
-        if (currentAggregate.IsFullyApproved)
+        if (currentAggregate.HasFailedReviewers && FailedReviewerHandling == FailedReviewerHandling.Abort)
+            return ConvergenceDecision.AbortReviewerUnavailable;
+
+        var isApproved = FailedReviewerHandling == FailedReviewerHandling.TreatAsNonBlocking
+            ? currentAggregate.IsApprovedIgnoringFailed
+            : currentAggregate.IsFullyApproved;
+
+        if (isApproved)
             return ConvergenceDecision.Approved;
 
         if (AbortOnCritical && currentAggregate.AllFindings.Any(f => f.Severity == FindingSeverity.Critical))

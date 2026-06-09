@@ -24,5 +24,11 @@ public enum ConvergenceDecision
     AbortCriticalBlocker,
 
     /// <summary>Automatic resolution seems impossible. Escalate to human.</summary>
-    EscalateToHuman
+    EscalateToHuman,
+
+    /// <summary>
+    /// A reviewer reported an infrastructure failure and the pipeline is configured with
+    /// <see cref="FailedReviewerHandling.Abort"/>. Abort the pipeline immediately.
+    /// </summary>
+    AbortReviewerUnavailable
 }
