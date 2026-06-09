@@ -1,5 +1,6 @@
 using Geef.Sdk.Advisors;
 using Geef.Sdk.Context;
+using Geef.Sdk.Policies;
 using Geef.Sdk.Runtime;
 
 namespace Geef.Sdk;
@@ -22,8 +23,20 @@ public sealed record GeefPipelineResult<TOutput>
     /// <summary>Total wall-clock duration of the run.</summary>
     public required TimeSpan TotalDuration { get; init; }
 
-    /// <summary>Whether the run completed successfully.</summary>
+    /// <summary>Whether the run completed successfully (fully converged).</summary>
     public required bool Success { get; init; }
+
+    /// <summary>
+    /// The reason the run stopped, when it did not converge (<see cref="Success"/> = false).
+    /// Null on a fully successful run.
+    /// </summary>
+    public ConvergenceDecision? StopReason { get; init; }
+
+    /// <summary>
+    /// Number of iterations in which at least one reviewer reported an infrastructure failure
+    /// (decision = Failed). A positive value indicates degraded review quality.
+    /// </summary>
+    public int DegradedIterations { get; init; }
 
     /// <summary>The final context snapshot at the time of finalization.</summary>
     public required IRunContext FinalContext { get; init; }

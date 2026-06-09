@@ -31,6 +31,7 @@ public sealed class GeefPipelineRunner<TOutput>
     private readonly IReadOnlyList<(IAdvisor Advisor, AdvisorTrigger Trigger)> _triggeredAdvisors;
     private readonly IAdvisorPolicy _advisorPolicy;
     private readonly AdvisorBudget _advisorBudgetTemplate;
+    private readonly bool _bestEffortOnNonConvergence;
 
     internal GeefPipelineRunner(GeefPipelineBuilder<TOutput> builder)
     {
@@ -51,6 +52,7 @@ public sealed class GeefPipelineRunner<TOutput>
         _triggeredAdvisors = builder.TriggeredAdvisors.ToList();
         _advisorPolicy = builder.AdvisorPolicy;
         _advisorBudgetTemplate = builder.AdvisorBudget;
+        _bestEffortOnNonConvergence = builder.BestEffortOnNonConvergence;
     }
 
     /// <summary>
@@ -222,7 +224,8 @@ public sealed class GeefPipelineRunner<TOutput>
                 Iteration = iteration,
                 StartedAt = iterationStart,
                 ExecutionDuration = execSw.Elapsed,
-                EvaluationResult = aggregate
+                EvaluationResult = aggregate,
+                Context = _bestEffortOnNonConvergence ? context : null
             };
             iterationHistory.Add(record);
 
@@ -255,6 +258,36 @@ public sealed class GeefPipelineRunner<TOutput>
                         context, iteration, onFailureAdvisors, orchestrator, cancellationToken);
                     // Re-enter the loop for one recovery pass.
                     convergenceDecision = ConvergenceDecision.Continue;
+                }
+                else if (_bestEffortOnNonConvergence)
+                {
+                    // Best-effort mode: finalize the best available iteration instead of throwing.
+                    await PublishPipelineFailedAsync(runId, convergenceDecision, iteration, iterationHistory, cancellationToken);
+
+                    var bestRecord = SelectBestIteration(iterationHistory);
+                    var bestContext = bestRecord.Context ?? context;
+
+                    orchestrator.SetCurrentPhase(GeefPhase.Finalize, null);
+                    var bestEffortFinalize = await RunBestEffortFinalizeAsync(runId, bestContext, cancellationToken);
+
+                    sw.Stop();
+                    await _eventSink.PublishAsync(
+                        new PipelineCompletedEvent(runId, false, iterationHistory.Count, sw.Elapsed, DateTimeOffset.UtcNow), cancellationToken);
+
+                    return new GeefPipelineResult<TOutput>
+                    {
+                        Output           = bestEffortFinalize.Output,
+                        RunId            = runId,
+                        TotalIterations  = iterationHistory.Count,
+                        TotalDuration    = sw.Elapsed,
+                        Success          = false,
+                        StopReason       = convergenceDecision,
+                        DegradedIterations = CountDegradedIterations(iterationHistory),
+                        FinalContext     = bestEffortFinalize.FinalContext,
+                        History          = iterationHistory,
+                        AdvisorConsultations = orchestrator.Provenance.Consultations,
+                        AdvisorAttributions  = orchestrator.Provenance.Attributions,
+                    };
                 }
                 else
                 {
@@ -314,15 +347,16 @@ public sealed class GeefPipelineRunner<TOutput>
 
         return new GeefPipelineResult<TOutput>
         {
-            Output = finalizeResult.Output,
-            RunId = runId,
-            TotalIterations = iterationHistory.Count,
-            TotalDuration = sw.Elapsed,
-            FinalContext = finalizeResult.FinalContext,
-            History = iterationHistory,
-            Success = true,
+            Output             = finalizeResult.Output,
+            RunId              = runId,
+            TotalIterations    = iterationHistory.Count,
+            TotalDuration      = sw.Elapsed,
+            FinalContext       = finalizeResult.FinalContext,
+            History            = iterationHistory,
+            Success            = true,
+            DegradedIterations = CountDegradedIterations(iterationHistory),
             AdvisorConsultations = orchestrator.Provenance.Consultations,
-            AdvisorAttributions = orchestrator.Provenance.Attributions,
+            AdvisorAttributions  = orchestrator.Provenance.Attributions,
         };
 
         }
@@ -455,6 +489,39 @@ public sealed class GeefPipelineRunner<TOutput>
         var block = $"[Advisor consultations]\n\n{string.Join("\n\n", outputs)}\n\n[End of advisor consultations]";
         return context.Set(GeefKeys.AdvisorContext, block);
     }
+
+    private async Task<FinalizeResult<TOutput>> RunBestEffortFinalizeAsync(
+        string runId,
+        IRunContext bestContext,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var ctx = MakeContext(GeefPhase.Finalize, bestContext, runId, null, cancellationToken);
+            return await RunWithMiddlewareAsync(ctx,
+                () => _finalizer.FinalizeAsync(bestContext, ctx.CancellationToken));
+        }
+        catch
+        {
+            // If the best-effort finalize itself fails, run without middleware so we always
+            // return something rather than throwing in the non-throw path.
+            return await _finalizer.FinalizeAsync(bestContext, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Selects the best iteration from history for best-effort finalization:
+    /// fewest <see cref="ReviewDecision.Rejected"/> reviews (most progress toward convergence),
+    /// then most recent iteration as a tiebreaker.
+    /// </summary>
+    private static IterationRecord SelectBestIteration(IterationHistory history)
+        => history.Records
+            .OrderBy(r => r.EvaluationResult.Reviews.Count(rv => rv.Decision == ReviewDecision.Rejected))
+            .ThenByDescending(r => r.Iteration)
+            .First();
+
+    private static int CountDegradedIterations(IterationHistory history)
+        => history.Records.Count(r => r.EvaluationResult.HasFailedReviewers);
 
     private async Task PublishPipelineFailedAsync(
         string runId,
