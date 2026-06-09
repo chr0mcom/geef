@@ -33,10 +33,5 @@ jobs:
       - name: Pack
         run: dotnet pack src/Geef.Sdk/Geef.Sdk.csproj --no-build -c Release -o ./nupkg
 
-      - name: Login to NuGet (Trusted Publishing)
-        uses: NuGet/login@v1
-        with:
-          username: chr0mcom
-
       - name: Push to NuGet.org
         run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
