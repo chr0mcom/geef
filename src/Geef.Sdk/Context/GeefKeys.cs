@@ -26,4 +26,13 @@ public static class GeefKeys
 
     /// <summary>The complete iteration history for convergence analysis.</summary>
     public static readonly ContextKey<IterationHistory> IterationHistory = new("geef:iteration-history");
+
+    /// <summary>
+    /// Combined advice block injected by the runner from trigger-registered advisors
+    /// (<see cref="Advisors.AdvisorTrigger.BeforeFirstExecution"/>,
+    /// <see cref="Advisors.AdvisorTrigger.BeforeEveryExecution"/>, or
+    /// <see cref="Advisors.AdvisorTrigger.OnConvergenceFailure"/>).
+    /// Providers (executors, grounders) may read this key to include advisor guidance in their prompts.
+    /// </summary>
+    public static readonly ContextKey<string> AdvisorContext = new("geef:advisor-context");
 }
