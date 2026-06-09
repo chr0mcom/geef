@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Geef.Sdk</RootNamespace>
     <PackageId>Geef.Sdk</PackageId>
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
     <Description>GEEF Pipeline SDK — A policy-driven orchestration framework for AI agent workflows with typed context, convergence policies, and structured observability.</Description>
     <PackageTags>ai;agent;pipeline;orchestration;geef;review-loop</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

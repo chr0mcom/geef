@@ -1,3 +1,4 @@
+using Geef.Sdk.Context;
 using Geef.Sdk.Results;
 
 namespace Geef.Sdk.Runtime;
@@ -18,6 +19,12 @@ public sealed record IterationRecord
 
     /// <summary>The aggregated evaluation result of this iteration.</summary>
     public required EvaluationAggregate EvaluationResult { get; init; }
+
+    /// <summary>
+    /// The run context captured after the execution phase of this iteration.
+    /// Used by best-effort finalization to reconstruct the output of the best iteration.
+    /// </summary>
+    public IRunContext? Context { get; init; }
 
     /// <summary>
     /// Set of finding fingerprints in this iteration

@@ -26,6 +26,7 @@ public sealed class GeefPipelineBuilder<TOutput>
     internal List<(IAdvisor Advisor, AdvisorTrigger Trigger)> TriggeredAdvisors { get; } = new();
     internal IAdvisorPolicy AdvisorPolicy { get; private set; } = new DefaultAdvisorPolicy();
     internal AdvisorBudget AdvisorBudget { get; private set; } = new AdvisorBudget();
+    internal bool BestEffortOnNonConvergence { get; private set; }
 
     /// <summary>Sets the grounding step.</summary>
     public GeefPipelineBuilder<TOutput> UseGrounding(IGroundingStep grounding)
@@ -124,6 +125,19 @@ public sealed class GeefPipelineBuilder<TOutput>
     public GeefPipelineBuilder<TOutput> UseAdvisorBudget(AdvisorBudget budget)
     {
         AdvisorBudget = budget ?? throw new ArgumentNullException(nameof(budget));
+        return this;
+    }
+
+    /// <summary>
+    /// When the pipeline fails to converge, instead of throwing <see cref="Exceptions.ConvergenceFailedException"/>,
+    /// run the finalizer on the best iteration (fewest blocking findings, most recent as tiebreaker) and return
+    /// a <see cref="GeefPipelineResult{TOutput}"/> with <c>Success = false</c> and a non-null <c>StopReason</c>.
+    /// Requires that every <see cref="Runtime.IterationRecord"/> has a captured <c>Context</c>; the runner sets
+    /// this automatically when this option is active.
+    /// </summary>
+    public GeefPipelineBuilder<TOutput> EnableBestEffortOnNonConvergence()
+    {
+        BestEffortOnNonConvergence = true;
         return this;
     }
 
