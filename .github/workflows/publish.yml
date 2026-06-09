@@ -30,4 +30,11 @@ jobs:
         run: dotnet pack src/Geef.Sdk/Geef.Sdk.csproj --no-build -c Release -o ./nupkg
 
       - name: Push to NuGet.org
-        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY secret is not set. Add it under Settings › Secrets › Actions in the chr0mcom/geef repository."
+            exit 1
+          fi
+          dotnet nuget push ./nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
