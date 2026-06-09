@@ -64,7 +64,7 @@ public sealed class DefaultConvergencePolicyTests
     }
 
     [Fact]
-    public void Returns_StopMaxAttemptsReached_when_time_exceeded()
+    public void Returns_StopTimeBudgetReached_when_time_exceeded()
     {
         var policy = new DefaultConvergencePolicy { MaxElapsedTime = TimeSpan.FromSeconds(1) };
         var aggregate = MakeAggregate(ReviewDecision.Rejected,
@@ -72,7 +72,7 @@ public sealed class DefaultConvergencePolicyTests
 
         var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.FromSeconds(2));
 
-        decision.Should().Be(ConvergenceDecision.StopMaxAttemptsReached);
+        decision.Should().Be(ConvergenceDecision.StopTimeBudgetReached);
     }
 
     [Fact]
@@ -140,5 +140,160 @@ public sealed class DefaultConvergencePolicyTests
         var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.Zero);
 
         decision.Should().Be(ConvergenceDecision.Continue);
+    }
+
+    // ── Phase 3: StopTimeBudgetReached vs StopMaxAttemptsReached ─────────────
+
+    [Fact]
+    public void StopTimeBudgetReached_is_distinct_from_StopMaxAttemptsReached()
+    {
+        ConvergenceDecision.StopTimeBudgetReached.Should().NotBe(ConvergenceDecision.StopMaxAttemptsReached);
+    }
+
+    // ── Phase 3: MinutesPerIteration auto-scale ───────────────────────────────
+
+    [Fact]
+    public void MinutesPerIteration_raises_effective_budget_above_MaxElapsedTime()
+    {
+        // MaxElapsedTime=1min but MinutesPerIteration=5 with MaxIterations=10 → effective=50min
+        var policy = new DefaultConvergencePolicy
+        {
+            MaxElapsedTime = TimeSpan.FromMinutes(1),
+            MinutesPerIteration = 5,
+            MaxIterations = 10
+        };
+        var aggregate = MakeAggregate(ReviewDecision.Rejected,
+            new Finding { ReviewerName = "R", Fingerprint = "fp", Message = "x" });
+
+        // elapsed=5min should NOT stop (effective budget is 50min)
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.FromMinutes(5));
+
+        decision.Should().Be(ConvergenceDecision.Continue);
+    }
+
+    [Fact]
+    public void MinutesPerIteration_disabled_when_zero_leaves_MaxElapsedTime_unchanged()
+    {
+        var policy = new DefaultConvergencePolicy
+        {
+            MaxElapsedTime = TimeSpan.FromMinutes(1),
+            MinutesPerIteration = 0,
+            MaxIterations = 10
+        };
+        var aggregate = MakeAggregate(ReviewDecision.Rejected,
+            new Finding { ReviewerName = "R", Fingerprint = "fp", Message = "x" });
+
+        // elapsed=2min should stop — no auto-scale, MaxElapsedTime=1min applies
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.FromMinutes(2));
+
+        decision.Should().Be(ConvergenceDecision.StopTimeBudgetReached);
+    }
+
+    [Fact]
+    public void MinutesPerIteration_honors_explicit_MaxElapsedTime_when_larger()
+    {
+        // MaxElapsedTime=120min, MinutesPerIteration=5, MaxIterations=10 → effective=max(120,50)=120min
+        var policy = new DefaultConvergencePolicy
+        {
+            MaxElapsedTime = TimeSpan.FromMinutes(120),
+            MinutesPerIteration = 5,
+            MaxIterations = 10
+        };
+        var aggregate = MakeAggregate(ReviewDecision.Rejected,
+            new Finding { ReviewerName = "R", Fingerprint = "fp", Message = "x" });
+
+        // elapsed=90min should NOT stop (effective budget is 120min)
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.FromMinutes(90));
+
+        decision.Should().Be(ConvergenceDecision.Continue);
+    }
+
+    // ── Phase 3: BlockingSeverity ─────────────────────────────────────────────
+
+    [Fact]
+    public void BlockingSeverity_Error_prevents_approval_when_error_findings_exist()
+    {
+        var policy = new DefaultConvergencePolicy
+        {
+            BlockingSeverity = FindingSeverity.Error,
+            MaxIterations = 10
+        };
+        var errorFinding = new Finding
+        {
+            ReviewerName = "R",
+            Fingerprint = "fp-error",
+            Message = "Error finding",
+            Severity = FindingSeverity.Error
+        };
+        // Reviewer says Approved but there's an Error finding — policy should block
+        var aggregate = MakeAggregate(ReviewDecision.ApprovedWithWarnings, errorFinding);
+
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.Zero);
+
+        decision.Should().NotBe(ConvergenceDecision.Approved);
+    }
+
+    [Fact]
+    public void BlockingSeverity_Warning_also_blocks_on_warning_findings()
+    {
+        var policy = new DefaultConvergencePolicy
+        {
+            BlockingSeverity = FindingSeverity.Warning,
+            MaxIterations = 10
+        };
+        var warningFinding = new Finding
+        {
+            ReviewerName = "R",
+            Fingerprint = "fp-warn",
+            Message = "Warning finding",
+            Severity = FindingSeverity.Warning
+        };
+        var aggregate = MakeAggregate(ReviewDecision.ApprovedWithWarnings, warningFinding);
+
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.Zero);
+
+        decision.Should().NotBe(ConvergenceDecision.Approved);
+    }
+
+    [Fact]
+    public void BlockingSeverity_Critical_allows_approval_with_error_findings()
+    {
+        var policy = new DefaultConvergencePolicy
+        {
+            BlockingSeverity = FindingSeverity.Critical,
+            AbortOnCritical = false,
+            MaxIterations = 10
+        };
+        var errorFinding = new Finding
+        {
+            ReviewerName = "R",
+            Fingerprint = "fp-error",
+            Message = "Error finding",
+            Severity = FindingSeverity.Error
+        };
+        // BlockingSeverity=Critical means Error findings don't block
+        var aggregate = MakeAggregate(ReviewDecision.ApprovedWithWarnings, errorFinding);
+
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.Zero);
+
+        decision.Should().Be(ConvergenceDecision.Approved);
+    }
+
+    [Fact]
+    public void BlockingSeverity_Info_findings_do_not_block_with_default_Error_threshold()
+    {
+        var policy = new DefaultConvergencePolicy { MaxIterations = 10 }; // default BlockingSeverity = Error
+        var infoFinding = new Finding
+        {
+            ReviewerName = "R",
+            Fingerprint = "fp-info",
+            Message = "Info finding",
+            Severity = FindingSeverity.Info
+        };
+        var aggregate = MakeAggregate(ReviewDecision.ApprovedWithWarnings, infoFinding);
+
+        var decision = policy.Evaluate(new IterationHistory(), aggregate, TimeSpan.Zero);
+
+        decision.Should().Be(ConvergenceDecision.Approved);
     }
 }
