@@ -46,6 +46,13 @@ public sealed record PipelineCompletedEvent(string RunId, bool Success, int Tota
 public sealed record PipelineFailedEvent(string RunId, ConvergenceDecision Reason, int TotalIterations, IterationHistory History, DateTimeOffset Timestamp) : IGeefEvent;
 
 /// <summary>
+/// Fired when a reviewer throws an infrastructure exception that is caught and converted to
+/// <see cref="ReviewDecision.Failed"/> by <see cref="Runtime.InstrumentedReviewer"/>. The pipeline
+/// continues; the calling policy decides whether to treat <c>Failed</c> as blocking or non-blocking.
+/// </summary>
+public sealed record ReviewerFaultIsolatedEvent(string RunId, int Iteration, string ReviewerName, string FaultMessage, DateTimeOffset Timestamp) : IGeefEvent;
+
+/// <summary>
 /// Fired when an advisor consultation starts. Only fired when the advisor is actually
 /// invoked — NOT fired on <see cref="AdvisorOutcome.BudgetExceeded"/> or policy-rejected
 /// <see cref="AdvisorOutcome.NoApplicableAdvice"/> paths.

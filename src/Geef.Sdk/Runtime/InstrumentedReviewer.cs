@@ -7,7 +7,9 @@ using Geef.Sdk.Results;
 namespace Geef.Sdk.Runtime;
 
 /// <summary>
-/// Wraps a reviewer to emit structured events and tracing spans around each review call.
+/// Wraps a reviewer to emit structured events and tracing spans around each review call,
+/// and to fault-isolate the reviewer: any non-cancellation exception is caught and converted
+/// to a <see cref="ReviewDecision.Failed"/> result so one reviewer cannot abort the whole round.
 /// </summary>
 internal sealed class InstrumentedReviewer : IReviewer
 {
@@ -42,7 +44,45 @@ internal sealed class InstrumentedReviewer : IReviewer
         activity?.SetTag("geef.iteration", _iteration);
         activity?.SetTag("geef.reviewer", _inner.Name);
 
-        var result = await _inner.ReviewAsync(context, cancellationToken);
+        ReviewResult result;
+        try
+        {
+            result = await _inner.ReviewAsync(context, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var fault = new Finding
+            {
+                ReviewerName = _inner.Name,
+                Fingerprint = $"reviewer-fault:{_inner.Name}",
+                Message = $"Reviewer '{_inner.Name}' failed with an infrastructure error: {ex.Message}",
+                Severity = FindingSeverity.Error,
+                Category = "Infrastructure"
+            };
+            result = new ReviewResult
+            {
+                ReviewerName = _inner.Name,
+                Decision = ReviewDecision.Failed,
+                Findings = new[] { fault },
+                SuggestedRetryHint = ex.Message
+            };
+
+            activity?.SetTag("geef.review.fault", ex.GetType().Name);
+            try
+            {
+                await _eventSink.PublishAsync(
+                    new ReviewerFaultIsolatedEvent(_runId, _iteration, _inner.Name, ex.Message, DateTimeOffset.UtcNow),
+                    CancellationToken.None);
+            }
+            catch
+            {
+                // Swallow event-sink errors during fault path
+            }
+        }
 
         activity?.SetTag("geef.review.decision", result.Decision.ToString());
         activity?.SetTag("geef.review.finding_count", result.Findings.Count);

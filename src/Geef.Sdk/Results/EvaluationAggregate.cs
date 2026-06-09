@@ -23,6 +23,23 @@ public sealed record EvaluationAggregate
             or ReviewDecision.ApprovedWithWarnings
             or ReviewDecision.NotApplicable);
 
+    /// <summary>All reviews that reported an infrastructure failure (<see cref="ReviewDecision.Failed"/>).</summary>
+    public IReadOnlyList<ReviewResult> FailedReviewers =>
+        Reviews.Where(r => r.Decision == ReviewDecision.Failed).ToList();
+
+    /// <summary>True if at least one reviewer reported an infrastructure failure.</summary>
+    public bool HasFailedReviewers => Reviews.Any(r => r.Decision == ReviewDecision.Failed);
+
+    /// <summary>
+    /// True if all non-failed reviewers are Approved, ApprovedWithWarnings, or NotApplicable.
+    /// Use this when <see cref="Policies.FailedReviewerHandling.TreatAsNonBlocking"/> is active.
+    /// </summary>
+    public bool IsApprovedIgnoringFailed =>
+        Reviews.All(r => r.Decision is ReviewDecision.Approved
+            or ReviewDecision.ApprovedWithWarnings
+            or ReviewDecision.NotApplicable
+            or ReviewDecision.Failed);
+
     /// <summary>Total duration of all reviews.</summary>
     public TimeSpan TotalDuration =>
         Reviews.Aggregate(TimeSpan.Zero, (sum, r) => sum + r.Duration);

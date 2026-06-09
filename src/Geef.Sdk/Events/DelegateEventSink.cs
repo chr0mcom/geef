@@ -21,6 +21,12 @@ public sealed class DelegateEventSink : IGeefEventSink
     /// <summary>Called when execution completes.</summary>
     public Func<ExecutionCompletedEvent, Task>? OnExecutionCompleted { get; set; }
 
+    /// <summary>Called when a reviewer starts.</summary>
+    public Func<ReviewerStartedEvent, Task>? OnReviewerStarted { get; set; }
+
+    /// <summary>Called when a reviewer completes.</summary>
+    public Func<ReviewerCompletedEvent, Task>? OnReviewerCompleted { get; set; }
+
     /// <summary>Called when evaluation results in rejection.</summary>
     public Func<EvaluationRejectedEvent, Task>? OnEvaluationRejected { get; set; }
 
@@ -39,6 +45,9 @@ public sealed class DelegateEventSink : IGeefEventSink
     /// <summary>Called when a pipeline fails.</summary>
     public Func<PipelineFailedEvent, Task>? OnPipelineFailed { get; set; }
 
+    /// <summary>Called when a reviewer throws an infrastructure error and is fault-isolated.</summary>
+    public Func<ReviewerFaultIsolatedEvent, Task>? OnReviewerFaultIsolated { get; set; }
+
     /// <summary>Called when an advisor consultation starts.</summary>
     public Func<AdvisorConsultationStartedEvent, Task>? OnAdvisorConsultationStarted { get; set; }
 
@@ -55,12 +64,15 @@ public sealed class DelegateEventSink : IGeefEventSink
             GroundingCompletedEvent e => OnGroundingCompleted?.Invoke(e),
             ExecutionStartedEvent e => OnExecutionStarted?.Invoke(e),
             ExecutionCompletedEvent e => OnExecutionCompleted?.Invoke(e),
+            ReviewerStartedEvent e => OnReviewerStarted?.Invoke(e),
+            ReviewerCompletedEvent e => OnReviewerCompleted?.Invoke(e),
             EvaluationRejectedEvent e => OnEvaluationRejected?.Invoke(e),
             EvaluationApprovedEvent e => OnEvaluationApproved?.Invoke(e),
             FinalizeStartedEvent e => OnFinalizeStarted?.Invoke(e),
             FinalizeCompletedEvent e => OnFinalizeCompleted?.Invoke(e),
             PipelineCompletedEvent e => OnPipelineCompleted?.Invoke(e),
             PipelineFailedEvent e => OnPipelineFailed?.Invoke(e),
+            ReviewerFaultIsolatedEvent e => OnReviewerFaultIsolated?.Invoke(e),
             AdvisorConsultationStartedEvent e => OnAdvisorConsultationStarted?.Invoke(e),
             AdvisorConsultationCompletedEvent e => OnAdvisorConsultationCompleted?.Invoke(e),
             _ => null
