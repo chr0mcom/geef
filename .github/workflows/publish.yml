@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -29,12 +33,10 @@ jobs:
       - name: Pack
         run: dotnet pack src/Geef.Sdk/Geef.Sdk.csproj --no-build -c Release -o ./nupkg
 
+      - name: Login to NuGet (Trusted Publishing)
+        uses: NuGet/login@v1
+        with:
+          username: chr0mcom
+
       - name: Push to NuGet.org
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NUGET_API_KEY secret is not set. Add it under Settings › Secrets › Actions in the chr0mcom/geef repository."
-            exit 1
-          fi
-          dotnet nuget push ./nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
