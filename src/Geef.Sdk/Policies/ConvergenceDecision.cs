@@ -11,8 +11,11 @@ public enum ConvergenceDecision
     /// <summary>Evaluation failed, but progress is detectable. Continue iterating.</summary>
     Continue,
 
-    /// <summary>Maximum iterations or time budget reached. Abort pipeline.</summary>
+    /// <summary>Maximum iterations reached. Abort pipeline.</summary>
     StopMaxAttemptsReached,
+
+    /// <summary>Wall-clock time budget exceeded. Abort pipeline.</summary>
+    StopTimeBudgetReached,
 
     /// <summary>Stagnation detected (same findings over multiple rounds). Abort.</summary>
     StopStagnant,
